@@ -1,5 +1,7 @@
-/.DS_Store
+.DS_Store
 /.conda
 /README.md
-/__pycache__
-/datasets
+__pycache__
+/datasets/synapse_data
+.ipynb_checkpoints
+desktop.ini
