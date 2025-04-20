@@ -4,3 +4,6 @@ __pycache__
 /datasets/synapse_data
 .ipynb_checkpoints
 desktop.ini
+data/Synapse
+lists/lists_Synapse
+download_token.py
