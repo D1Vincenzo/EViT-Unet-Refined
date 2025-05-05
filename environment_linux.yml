@@ -31,4 +31,5 @@ dependencies:
       - thop
       - h5py
       - batchgenerators
+      - nibabel
 
