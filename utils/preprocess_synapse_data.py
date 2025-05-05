@@ -10,8 +10,8 @@ img_dir = 'datasets/synapse_data/averaged-training-images'
 label_dir = 'datasets/synapse_data/averaged-training-labels'
 
 # 输出路径
-train_npz_dir = 'data/synapse/train_npz'
-val_h5_dir = 'data/synapse/test_vol_h5'
+train_npz_dir = 'data/Synapse/train_npz'
+val_h5_dir = 'data/Synapse/test_vol_h5'
 os.makedirs(train_npz_dir, exist_ok=True)
 os.makedirs(val_h5_dir, exist_ok=True)
 
