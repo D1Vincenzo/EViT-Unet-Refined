@@ -5,7 +5,6 @@ __pycache__
 .ipynb_checkpoints
 desktop.ini
 data/Synapse
-lists/lists_Synapse
 download_token.py
 runs
 datasets/RawData

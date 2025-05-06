@@ -15,77 +15,43 @@ from tqdm import tqdm
 from utils.utils import DiceLoss
 from torchvision import transforms
 import torchvision
-# from utils import test_single_volume
 import torch.nn.functional as F
+from datasets.dataset_synapse import Synapse_dataset, RandomGenerator, RandomGenerator_DINO
 
 class KDloss(nn.Module):
-
-    def __init__(self,lambda_x):
-        super(KDloss,self).__init__()
+    def __init__(self, lambda_x):
+        super(KDloss, self).__init__()
         self.lambda_x = lambda_x
 
-    def inter_fd(self,f_s, f_t):
+    def inter_fd(self, f_s, f_t):
         s_C, t_C, s_H, t_H = f_s.shape[1], f_t.shape[1], f_s.shape[2], f_t.shape[2]
         if s_H > t_H:
             f_s = F.adaptive_avg_pool2d(f_s, (t_H, t_H))
         elif s_H < t_H:
             f_t = F.adaptive_avg_pool2d(f_t, (s_H, s_H))
-        else:
-            pass
-        
-        idx_s = random.sample(range(s_C),min(s_C,t_C))
-        idx_t = random.sample(range(t_C),min(s_C,t_C))
 
-        #inter_fd_loss = F.mse_loss(f_s[:, 0:min(s_C,t_C), :, :], f_t[:, 0:min(s_C,t_C), :, :].detach())
-
+        idx_s = random.sample(range(s_C), min(s_C, t_C))
+        idx_t = random.sample(range(t_C), min(s_C, t_C))
         inter_fd_loss = F.mse_loss(f_s[:, idx_s, :, :], f_t[:, idx_t, :, :].detach())
-        return inter_fd_loss 
-    
-    def intra_fd(self,f_s):
-        sorted_s, indices_s = torch.sort(F.normalize(f_s, p=2, dim=(2,3)).mean([0, 2, 3]), dim=0, descending=True)
+        return inter_fd_loss
+
+    def intra_fd(self, f_s):
+        sorted_s, indices_s = torch.sort(F.normalize(f_s, p=2, dim=(2, 3)).mean([0, 2, 3]), dim=0, descending=True)
         f_s = torch.index_select(f_s, 1, indices_s)
-        intra_fd_loss = F.mse_loss(f_s[:, 0:f_s.shape[1]//2, :, :], f_s[:, f_s.shape[1]//2: f_s.shape[1], :, :])
+        intra_fd_loss = F.mse_loss(f_s[:, 0:f_s.shape[1]//2, :, :], f_s[:, f_s.shape[1]//2:, :, :])
         return intra_fd_loss
-    
-    def forward(self,feature,feature_decoder,final_up):
-        # f1 = feature[0][-1] # 
-        # f2 = feature[1][-1]
-        # f3 = feature[2][-1]
-        # f4 = feature[3][-1] # lower feature 
 
-        f1_0 = feature[0] # 
-        f2_0 = feature[1]
-        f3_0 = feature[2]
-        f4_0 = feature[3] # lower feature 
-
-        # f1_d = feature_decoder[0][-1] # 14 x 14
-        # f2_d = feature_decoder[1][-1] # 28 x 28
-        # f3_d = feature_decoder[2][-1] # 56 x 56
-
-        f1_d_0 = feature_decoder[0] # 14 x 14
-        f2_d_0 = feature_decoder[1] # 28 x 28
-        f3_d_0 = feature_decoder[2] # 56 x 56
-
-        #print(f3_d.shape)
-
+    def forward(self, feature, feature_decoder, final_up):
+        f1_0, f2_0, f3_0, f4_0 = feature
+        f1_d_0, f2_d_0, f3_d_0 = feature_decoder
         final_layer = final_up
-        #print(final_layer.shape)
 
+        loss = (self.intra_fd(f1_0) + self.intra_fd(f2_0) + self.intra_fd(f3_0) + self.intra_fd(f4_0)) / 4
+        loss += (self.intra_fd(f1_d_0) + self.intra_fd(f2_d_0) + self.intra_fd(f3_d_0)) / 3
+        loss += (self.inter_fd(f1_d_0, final_layer) + self.inter_fd(f2_d_0, final_layer) + self.inter_fd(f3_d_0, final_layer) +
+                 self.inter_fd(f1_0, final_layer) + self.inter_fd(f2_0, final_layer) + self.inter_fd(f3_0, final_layer) + self.inter_fd(f4_0, final_layer)) / 7
+        return loss * self.lambda_x
 
-        # loss =  (self.intra_fd(f1)+self.intra_fd(f2)+self.intra_fd(f3)+self.intra_fd(f4))/4
-        loss = (self.intra_fd(f1_0)+self.intra_fd(f2_0)+self.intra_fd(f3_0)+self.intra_fd(f4_0))/4
-        loss += (self.intra_fd(f1_d_0)+self.intra_fd(f2_d_0)+self.intra_fd(f3_d_0))/3
-        # loss += (self.intra_fd(f1_d)+self.intra_fd(f2_d)+self.intra_fd(f3_d))/3
-
-
-        
-        loss += (self.inter_fd(f1_d_0,final_layer)+self.inter_fd(f2_d_0,final_layer)+self.inter_fd(f3_d_0,final_layer)
-                   +self.inter_fd(f1_0,final_layer)+self.inter_fd(f2_0,final_layer)+self.inter_fd(f3_0,final_layer)+self.inter_fd(f4_0,final_layer))/7
-
-        
-        
-        loss = loss * self.lambda_x
-        return loss 
 def cosine_scheduler(base_value, final_value, epochs, niter_per_ep, warmup_epochs=0, start_warmup_value=0):
     warmup_schedule = np.array([])
     warmup_iters = warmup_epochs * niter_per_ep
@@ -94,18 +60,32 @@ def cosine_scheduler(base_value, final_value, epochs, niter_per_ep, warmup_epoch
 
     iters = np.arange(epochs * niter_per_ep - warmup_iters)
     schedule = final_value + 0.5 * (base_value - final_value) * (1 + np.cos(np.pi * iters / len(iters)))
-
     schedule = np.concatenate((warmup_schedule, schedule))
-    assert len(schedule) == epochs * niter_per_ep
     return schedule
 
-import re
+def validate(model, val_loader, num_classes):
+    from utils.utils import calculate_metric_percase_dice
+    model.eval()
+    dice_scores = []
 
-def trainer_synapse(args, model, snapshot_path):
-    from datasets.dataset_synapse import Synapse_dataset, RandomGenerator, RandomGenerator_DINO
-    from torchvision.transforms import functional as VF
+    with torch.no_grad():
+        for batch in val_loader:
+            image, label = batch['image'].cuda(), batch['label'].cuda()
+            output = model(image)
+            pred = torch.argmax(torch.softmax(output, dim=1), dim=1)
 
-    logging.basicConfig(filename=snapshot_path + "/log.txt", level=logging.INFO,
+            for i in range(1, num_classes):  # 忽略背景类 0
+                pred_i = (pred == i).cpu().numpy().astype(np.uint8)
+                label_i = (label == i).cpu().numpy().astype(np.uint8)
+                dice, _, _, _ = calculate_metric_percase_dice(pred_i, label_i)
+                dice_scores.append(dice)
+
+    model.train()
+    return np.mean(dice_scores)
+
+
+def trainer_synapse(args, model, snapshot_path, val_list_filename='val.txt'):
+    logging.basicConfig(filename=os.path.join(snapshot_path, "log.txt"), level=logging.INFO,
                         format='[%(asctime)s.%(msecs)03d] %(message)s', datefmt='%H:%M:%S')
     logging.getLogger().addHandler(logging.StreamHandler(sys.stdout))
     logging.info(str(args))
@@ -115,18 +95,17 @@ def trainer_synapse(args, model, snapshot_path):
     batch_size = args.batch_size * args.n_gpu
 
     db_train = Synapse_dataset(base_dir=args.root_path, list_dir=args.list_dir, split="train",
-                               transform=transforms.Compose(
-                                   [RandomGenerator(output_size=[args.img_size, args.img_size])]),
-                               transform_dino=transforms.Compose(
-                                   [RandomGenerator_DINO(output_size=[args.img_size, args.img_size])]))
+                               transform=transforms.Compose([
+                                   RandomGenerator(output_size=[args.img_size, args.img_size])]),
+                               transform_dino=transforms.Compose([
+                                   RandomGenerator_DINO(output_size=[args.img_size, args.img_size])]))
 
-    print("The length of train set is: {}".format(len(db_train)))
+    db_val = Synapse_dataset(base_dir=args.root_path.replace("train_npz", "val_npz"), list_dir=args.list_dir, split="val",
+                             transform=transforms.Compose([
+                                 RandomGenerator(output_size=[args.img_size, args.img_size])]))
 
-    def worker_init_fn(worker_id):
-        random.seed(args.seed + worker_id)
-
-    trainloader = DataLoader(db_train, batch_size=batch_size, shuffle=True, num_workers=8, pin_memory=True,
-                             worker_init_fn=worker_init_fn)
+    trainloader = DataLoader(db_train, batch_size=batch_size, shuffle=True, num_workers=8, pin_memory=True)
+    valloader = DataLoader(db_val, batch_size=1, shuffle=False, num_workers=4, pin_memory=True)
 
     if args.n_gpu > 1:
         model = nn.DataParallel(model)
@@ -135,47 +114,17 @@ def trainer_synapse(args, model, snapshot_path):
     ce_loss = CrossEntropyLoss()
     dice_loss = DiceLoss(num_classes)
     optimizer = optim.AdamW(model.parameters(), lr=base_lr, weight_decay=0.001)
-
     writer = SummaryWriter(snapshot_path + '/log')
     max_epoch = args.max_epochs
     max_iterations = args.max_epochs * len(trainloader)
-    logging.info("{} iterations per epoch. {} max iterations ".format(len(trainloader), max_iterations))
-    best_performance = 0.0
-
+    best_dice = 0.0
     iter_num = 0
-    start_epoch = 0
-
-    # === ✅ Resume from checkpoint if specified
-    if args.resume:
-        if os.path.exists(args.resume):
-            checkpoint = torch.load(args.resume)
-            if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
-                model.load_state_dict(checkpoint['model_state_dict'])
-                optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-                start_epoch = checkpoint.get('epoch', 0) + 1
-                logging.info(f"🔁 Resumed training from checkpoint at epoch {start_epoch}")
-            else:
-                model.load_state_dict(checkpoint)
-                epoch_match = re.search(r'epoch_(\d+)', args.resume)
-                if epoch_match:
-                    start_epoch = int(epoch_match.group(1)) + 1
-                else:
-                    start_epoch = 0
-                logging.info(f"🔁 Loaded model weights only from {args.resume}, resumed from epoch {start_epoch}")
-        else:
-            raise FileNotFoundError(f"❌ Resume checkpoint not found: {args.resume}")
-
-
-
     momentum_schedule = cosine_scheduler(0.996, 1, max_iterations, len(trainloader))
-    iterator = tqdm(range(start_epoch, max_epoch), ncols=70)
 
-    for epoch_num in iterator:
-        for i_batch, sampled_batch in enumerate(trainloader):
+    for epoch_num in tqdm(range(max_epoch), ncols=70):
+        for sampled_batch in trainloader:
             image_batch, label_batch = sampled_batch['image'].cuda(), sampled_batch['label'].cuda()
-
             outputs = model(image_batch)
-
             loss_ce = ce_loss(outputs, label_batch.long())
             loss_dice = dice_loss(outputs, label_batch, softmax=True)
             loss = 0.4 * loss_ce + 0.6 * loss_dice
@@ -193,17 +142,28 @@ def trainer_synapse(args, model, snapshot_path):
             writer.add_scalar('info/total_loss', loss, iter_num)
             writer.add_scalar('info/dice_loss', loss_dice, iter_num)
             writer.add_scalar('info/loss_ce', loss_ce, iter_num)
-            # logging.info('iteration %d : loss : %f, loss_ce: %f' % (iter_num, loss.item(), loss_ce.item()))
 
-        # ✅ 保存完整 checkpoint
-        if epoch_num > 10 or epoch_num == max_epoch - 1:
-            save_mode_path = os.path.join(snapshot_path, f'epoch_{epoch_num}.pth')
-            torch.save({
-                'epoch': epoch_num,
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict()
-            }, save_mode_path)
-            logging.info("💾 Saved checkpoint to {}".format(save_mode_path))
+        # 每个 epoch 都验证一次
+        val_dice = validate(model, valloader, num_classes)
+        # logging.info(f"🧪 Epoch {epoch_num} Validation Dice: {val_dice:.4f}")
+        # 替代 logging.info()，避免干扰 tqdm 进度条
+        log_str = f"🧪 Epoch {epoch_num} Validation Dice: {val_dice:.4f}"
+        tqdm.write(log_str)
+        
+        if val_dice > best_dice:
+            best_dice = val_dice
+            best_path = os.path.join(snapshot_path, 'best_model.pth')
+            torch.save(model.state_dict(), best_path)
+    logging.info(f"🏆 Saved best model: epoch {epoch_num}, dice {val_dice:.4f}, to {best_path}")
+
+        # if epoch_num > 10 or epoch_num == max_epoch - 1:
+        #     save_mode_path = os.path.join(snapshot_path, f'epoch_{epoch_num}.pth')
+        #     torch.save({
+        #         'epoch': epoch_num,
+        #         'model_state_dict': model.state_dict(),
+        #         'optimizer_state_dict': optimizer.state_dict()
+        #     }, save_mode_path)
+        #     logging.info(f"💾 Saved checkpoint to {save_mode_path}")
 
     writer.close()
     return "Training Finished!"

@@ -164,7 +164,7 @@ class Synapse_dataset(Dataset):
         return len(self.sample_list)
 
     def __getitem__(self, idx):
-        if self.split == "train":
+        if self.split in ["train", "val"]:
             slice_name = self.sample_list[idx].strip('\n')
             data_path = os.path.join(self.data_dir, slice_name+'.npz')
             data = np.load(data_path)

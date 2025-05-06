@@ -7,10 +7,7 @@ import torch
 import torch.backends.cudnn as cudnn
 from trainer_unet import trainer_synapse
 import copy
-
-
 from timm.data import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
-
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--root_path', type=str,
@@ -37,18 +34,10 @@ parser.add_argument('--img_size', type=int,
                     default=224, help='input patch size of network input')
 parser.add_argument('--seed', type=int,
                     default=1234, help='random seed')
-# parser.add_argument('--cfg', type=str, required=True, metavar="FILE", help='path to config file', )
-parser.add_argument(
-        "--opts",
-        help="Modify config options by adding 'KEY VALUE' pairs. ",
-        default=None,
-        nargs='+',
-    )
+parser.add_argument('--opts', default=None, nargs='+', help="Modify config options by adding 'KEY VALUE' pairs. ")
 parser.add_argument('--zip', action='store_true', help='use zipped dataset instead of folder dataset')
 parser.add_argument('--cache-mode', type=str, default='part', choices=['no', 'full', 'part'],
-                    help='no: no cache, '
-                            'full: cache all data, '
-                            'part: sharding the dataset into nonoverlapping pieces and only cache one piece')
+                    help='no: no cache, full: cache all data, part: cache one shard')
 parser.add_argument('--resume', help='resume from checkpoint')
 parser.add_argument('--accumulation-steps', type=int, help="gradient accumulation steps")
 parser.add_argument('--use-checkpoint', action='store_true',
@@ -58,45 +47,41 @@ parser.add_argument('--amp-opt-level', type=str, default='O1', choices=['O0', 'O
 parser.add_argument('--tag', help='tag of experiment')
 parser.add_argument('--eval', action='store_true', help='Perform evaluation only')
 parser.add_argument('--throughput', action='store_true', help='Test throughput only')
-parser.add_argument('--gpu_id',default=0,type=int)
-parser.add_argument('--lambda_x',default=0.015,type=float)
-parser.add_argument('--dino_weight',default=0.3,type=float)
-parser.add_argument('--alpha',default=20.,type=float)
-parser.add_argument('--sigma',default=5.,type=float)
+parser.add_argument('--gpu_id', default=0, type=int)
+parser.add_argument('--lambda_x', default=0.015, type=float)
+parser.add_argument('--dino_weight', default=0.3, type=float)
+parser.add_argument('--alpha', default=20., type=float)
+parser.add_argument('--sigma', default=5., type=float)
 
-# lambda_x
+# NEW: 增加验证集支持
+parser.add_argument('--val_list', type=str, default='val.txt', help='validation list filename')
 
 args = parser.parse_args()
+
 if args.dataset == "Synapse":
     args.root_path = os.path.join(args.root_path, "train_npz")
-    
-def load_from(model, ckpt_path):
-    pretrained_path = ckpt_path
-    if pretrained_path is not None:
-        print("pretrained_path:{}".format(pretrained_path))
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        pretrained_dict = torch.load(pretrained_path, map_location=device)
 
-        pretrained_dict = pretrained_dict['model']
-        print("---start load pretrained modle of swin encoder---")
-        # print(pretrained_dict.keys())
+
+def load_from(model, ckpt_path):
+    if ckpt_path is not None:
+        print(f"pretrained_path: {ckpt_path}")
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        pretrained_dict = torch.load(ckpt_path, map_location=device)['model']
+        print("---start load pretrained model of swin encoder---")
+
         model_dict = model.state_dict()
-        # print(model_dict.keys())
-        
         full_dict = copy.deepcopy(pretrained_dict)
         for k, v in pretrained_dict.items():
             if "network." in k:
-                up_layer_num = 6-int(k.split('.')[1])
+                up_layer_num = 6 - int(k.split('.')[1])
                 current_k_up = "network_up_layers." + str(up_layer_num) + '.' + '.'.join(k.split('.')[2:])
-                full_dict.update({current_k_up:v})
+                full_dict.update({current_k_up: v})
                 full_dict["network_down_layers." + '.'.join(k.split('.')[1:])] = full_dict.pop(k)
 
         for k in list(full_dict.keys()):
-            if k in model_dict:
-                if full_dict[k].shape != model_dict[k].shape:
-                    print("delete:{};shape pretrain:{};shape model:{}".format(k,v.shape,model_dict[k].shape))
-                    del full_dict[k]
-
+            if k in model_dict and full_dict[k].shape != model_dict[k].shape:
+                print(f"delete: {k}; shape pretrain: {full_dict[k].shape}; shape model: {model_dict[k].shape}")
+                del full_dict[k]
 
         msg = model.load_state_dict(full_dict, strict=False)
         print(msg)
@@ -119,20 +104,20 @@ if __name__ == "__main__":
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed(args.seed)
 
-    dataset_name = args.dataset
     dataset_config = {
         'Synapse': {
             'root_path': args.root_path,
-            'list_dir': './lists/lists_Synapse',
+            'list_dir': args.list_dir,
             'num_classes': 9,
         },
     }
 
     if args.batch_size != 24 and args.batch_size % 6 == 0:
         args.base_lr *= args.batch_size / 24
-    args.num_classes = dataset_config[dataset_name]['num_classes']
-    args.root_path = dataset_config[dataset_name]['root_path']
-    args.list_dir = dataset_config[dataset_name]['list_dir']
+
+    args.num_classes = dataset_config[args.dataset]['num_classes']
+    args.root_path = dataset_config[args.dataset]['root_path']
+    args.list_dir = dataset_config[args.dataset]['list_dir']
 
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
@@ -146,9 +131,9 @@ if __name__ == "__main__":
         drop_path_rate=0.1,
         num_classes=9,
         fork_feat=True).cuda()
-    
+
     # net = load_from(net, 'eformer_l_450.pth')
 
-
-    trainer = {'Synapse': trainer_synapse,}
-    trainer[dataset_name](args, net, args.output_dir)
+    # ✅ 传入验证集列表文件名参数（args.val_list）
+    trainer = {'Synapse': trainer_synapse}
+    trainer[args.dataset](args, net, args.output_dir, val_list_filename=args.val_list)
