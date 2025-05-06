@@ -14,7 +14,7 @@ from timm.data import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--root_path', type=str,
-                    default='/data/Synapse', help='root dir for data')
+                    default='./data/Synapse', help='root dir for data')
 parser.add_argument('--dataset', type=str,
                     default='Synapse', help='experiment_name')
 parser.add_argument('--list_dir', type=str,
@@ -147,7 +147,7 @@ if __name__ == "__main__":
         num_classes=9,
         fork_feat=True).cuda()
     
-    net = load_from(net, 'eformer_l_450.pth')
+    # net = load_from(net, 'eformer_l_450.pth')
 
 
     trainer = {'Synapse': trainer_synapse,}
