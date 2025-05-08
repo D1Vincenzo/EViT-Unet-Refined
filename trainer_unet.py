@@ -74,7 +74,7 @@ def validate(model, val_loader, num_classes):
             output = model(image)
             pred = torch.argmax(torch.softmax(output, dim=1), dim=1)
 
-            for i in range(1, num_classes):  # 忽略背景类 0
+            for i in range(1, num_classes):
                 pred_i = (pred == i).cpu().numpy().astype(np.uint8)
                 label_i = (label == i).cpu().numpy().astype(np.uint8)
                 dice, _, _, _ = calculate_metric_percase_dice(pred_i, label_i)
@@ -143,27 +143,22 @@ def trainer_synapse(args, model, snapshot_path, val_list_filename='val.txt'):
             writer.add_scalar('info/dice_loss', loss_dice, iter_num)
             writer.add_scalar('info/loss_ce', loss_ce, iter_num)
 
-        # 每个 epoch 都验证一次
         val_dice = validate(model, valloader, num_classes)
-        # logging.info(f"🧪 Epoch {epoch_num} Validation Dice: {val_dice:.4f}")
-        # 替代 logging.info()，避免干扰 tqdm 进度条
         log_str = f"🧪 Epoch {epoch_num} Validation Dice: {val_dice:.4f}"
         tqdm.write(log_str)
-        
+
+        latest_path = os.path.join(snapshot_path, 'latest_checkpoint.pth')
+        torch.save({
+            'epoch': epoch_num,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict()
+        }, latest_path)
+
         if val_dice > best_dice:
             best_dice = val_dice
             best_path = os.path.join(snapshot_path, 'best_model.pth')
             torch.save(model.state_dict(), best_path)
+
     logging.info(f"🏆 Saved best model: epoch {epoch_num}, dice {val_dice:.4f}, to {best_path}")
-
-        # if epoch_num > 10 or epoch_num == max_epoch - 1:
-        #     save_mode_path = os.path.join(snapshot_path, f'epoch_{epoch_num}.pth')
-        #     torch.save({
-        #         'epoch': epoch_num,
-        #         'model_state_dict': model.state_dict(),
-        #         'optimizer_state_dict': optimizer.state_dict()
-        #     }, save_mode_path)
-        #     logging.info(f"💾 Saved checkpoint to {save_mode_path}")
-
     writer.close()
     return "Training Finished!"
