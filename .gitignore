@@ -9,5 +9,5 @@ download_token.py
 runs
 datasets/RawData
 predictions
-utils/__pycache__
-datasets/RawData.zip
+*.pyc
+*.zip
